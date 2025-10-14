@@ -35,6 +35,9 @@ else:
 STORE_CLOUDWATCH_LOGS = os.environ.get('STORE_CLOUDWATCH_LOGS', 'true').lower() == 'true'
 STORE_SOURCE_CODE = os.environ.get('STORE_SOURCE_CODE', 'true').lower() == 'true'
 
+# Log retrieval limits
+MAX_CLOUDWATCH_LOG_EVENTS = 10000  # CloudWatch API limit per request
+
 # Model selection switch (default: Claude Sonnet 4)
 USE_SONNET_4 = os.environ.get('USE_SONNET_4', 'true').lower() == 'true'
 
@@ -70,15 +73,64 @@ def fetch_cloudwatch_logs(log_group: str, log_stream: str, request_id: str = Non
         
         print(f"Fetching logs from {log_group}/{log_stream}" + (f" for request {request_id}" if request_id else ""))
         
-        # Get log events
-        response = cloudwatch_logs.get_log_events(
-            logGroupName=log_group,
-            logStreamName=log_stream,
-            limit=300,
-            startFromHead=False
-        )
+        # Paginate through CloudWatch logs to find the specific Request ID
+        all_events = []
+        next_token = None
+        pages_fetched = 0
+        max_pages = 10  # Safety limit: 10 pages * 10K events = 100K events max
         
-        all_events = response.get('events', [])
+        while pages_fetched < max_pages:
+            # Build API parameters
+            params = {
+                'logGroupName': log_group,
+                'logStreamName': log_stream,
+                'limit': MAX_CLOUDWATCH_LOG_EVENTS,
+                'startFromHead': False  # Start from newest logs
+            }
+            if next_token:
+                params['nextToken'] = next_token
+            
+            # Fetch page
+            response = cloudwatch_logs.get_log_events(**params)
+            events = response.get('events', [])
+            pages_fetched += 1
+            
+            # Get pagination tokens
+            next_forward_token = response.get('nextForwardToken')
+            next_backward_token = response.get('nextBackwardToken')
+            
+            # Add events to collection
+            all_events.extend(events)
+            
+            # Check if we've reached the end
+            if next_forward_token == next_backward_token:
+                break
+            
+            # If no events but tokens differ, we're in a gap - continue paginating
+            if not events and next_forward_token != next_backward_token:
+                next_token = next_backward_token
+                continue
+            
+            # If no events and no valid continuation, stop
+            if not events:
+                break
+            
+            # Check if we found the START of the execution (ensures complete logs)
+            if request_id:
+                # More efficient check - avoid string conversion
+                for event in events:
+                    if f"START RequestId: {request_id}" in event['message']:
+                        print(f"Found execution in {pages_fetched} page(s), retrieved {len(all_events)} events")
+                        break
+                else:
+                    # START not found, continue to next page
+                    next_token = next_backward_token
+                    continue
+                # START found, exit loop
+                break
+            
+            # Use backward token to go further back in time
+            next_token = next_backward_token
         
         # Filter by request ID using execution boundaries (most accurate)
         if request_id:
