@@ -42,7 +42,7 @@ AI-powered Lambda error diagnostics that transforms generic error messages into 
 - **Interleaved Thinking** - Claude Sonnet 4 reasons between tool calls for smarter investigation
 - **Confidence Scoring** - Evidence-based scoring (0.0-1.0) indicates analysis reliability
 - **Historical Tracking** - All analyses stored in DynamoDB for pattern recognition
-- **Production-Ready Decorator** - Simple `@error_capture` wrapper for any Lambda function
+- **Reusable Decorator** - Simple `@error_capture` wrapper for any Lambda function
 - **9 Test Scenarios** - Comprehensive test cases covering common validation errors
 
 ## Prerequisites
